@@ -8,10 +8,6 @@ def read_data():
 
     print(df.head())
 
-def get_sum(a, b):
-    return a + b
-
-
 def main():
     read_data()
 
