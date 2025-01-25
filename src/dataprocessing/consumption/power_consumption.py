@@ -19,7 +19,7 @@ if not os.path.exists(file_path):
 df = pd.read_excel(file_path)
 
 # Generate load data for 100 households
-num_households = 1000
+num_households = 100
 household_data = []
 
 for i in range(num_households):
