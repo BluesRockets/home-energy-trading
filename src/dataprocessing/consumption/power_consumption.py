@@ -4,7 +4,7 @@ import numpy as np
 
 # File paths
 file_path = '../../data/input/power_grid_energy_consumption_dataset.xlsx'
-output_file_path = '../../data/output/households_energy_consumption_dataset.xlsx'
+output_file_path = '../../data/output/consumption/households_energy_consumption_dataset.xlsx'
 
 # Check if the input file exists
 if not os.path.exists(file_path):
