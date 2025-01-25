@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 
 # File paths
-file_path = 'data/input/power_grid_energy_consumption_dataset.xlsx'
-output_file_path = 'data/output/households_energy_consumption_dataset.xlsx'
+file_path = '../../data/input/power_grid_energy_consumption_dataset.xlsx'
+output_file_path = '../../data/output/households_energy_consumption_dataset.xlsx'
 
 # Check if the input file exists
 if not os.path.exists(file_path):
@@ -15,13 +15,11 @@ if not os.path.exists(file_path):
         f"Expected location: {os.path.join(current_directory, file_path)}"
     )
 
-# 12345
-
 # Read the Excel file
 df = pd.read_excel(file_path)
 
 # Generate load data for 100 households
-num_households = 100
+num_households = 1000
 household_data = []
 
 for i in range(num_households):
