@@ -13,7 +13,6 @@ def rmse(actual, predicted):
     return np.sqrt(mean_squared_error(actual, predicted))
 
 # Step 1: Load dataset for model generation
-model_data_path = '/Users/isparkyou/PycharmProjects/home-energy-trading/test/agents/prediction/combined_hourly_data_no_time.csv'
 if not os.path.exists(model_data_path):
     raise FileNotFoundError(f"Dataset for model generation not found at: {model_data_path}")
 
@@ -59,14 +58,12 @@ stacking_train = pd.DataFrame({
     'target': y_train
 })
 
-
 # Train meta-model (Linear Regression)
 print("Training meta-model for stacking...")
 meta_model = LinearRegression()
 meta_model.fit(stacking_train[['rf', 'svm', 'xgb']], stacking_train['target'])
 
 # Step 2: Load new data for prediction
-prediction_data_path = '/Users/isparkyou/PycharmProjects/home-energy-trading/data/input/solar_hourly_energy_production_dataset.xlsx'
 if not os.path.exists(prediction_data_path):
     raise FileNotFoundError(f"Dataset for prediction not found at: {prediction_data_path}")
 
@@ -93,7 +90,6 @@ stacking_test = pd.DataFrame({
 final_predictions = meta_model.predict(stacking_test)
 
 # Step 3: Save predictions to file
-output_path = '/Users/isparkyou/PycharmProjects/home-energy-trading/data/output/production/solar_hourly_energy_predictions.xlsx'
 prediction_data['predicted_power'] = final_predictions
 prediction_data.to_excel(output_path, index=False)
 
