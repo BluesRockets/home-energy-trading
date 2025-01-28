@@ -3,8 +3,9 @@ import pandas as pd
 import numpy as np
 
 # File paths
-file_path = 'data/input/power_grid_energy_consumption_dataset.xlsx'
-output_file_path = 'data/output/households_energy_consumption_dataset.xlsx'
+file_path = '../../data/input/power_grid_energy_consumption_dataset.xlsx'
+output_file_path_1 = '../../data/output/consumption/households_energy_consumption_dataset_part1.xlsx'
+output_file_path_2 = '../../data/output/consumption/households_energy_consumption_dataset_part2.xlsx'
 
 # Check if the input file exists
 if not os.path.exists(file_path):
@@ -37,10 +38,16 @@ for i in range(num_households):
 # Combine all households' load data
 all_households_df = pd.concat(household_data, ignore_index=True)
 
+# Split the data into two parts
+mid_index = len(all_households_df) // 2
+part1_df = all_households_df.iloc[:mid_index]
+part2_df = all_households_df.iloc[mid_index:]
+
 # Ensure output directory exists before saving
-os.makedirs(os.path.dirname(output_file_path), exist_ok=True)
+os.makedirs(os.path.dirname(output_file_path_1), exist_ok=True)
 
-# Save to a new Excel file
-all_households_df.to_excel(output_file_path, index=False)
+# Save to new Excel files
+part1_df.to_excel(output_file_path_1, index=False)
+part2_df.to_excel(output_file_path_2, index=False)
 
-print(f"The data has been successfully saved to '{output_file_path}'.")
+print(f"The data has been successfully saved to '{output_file_path_1}' and '{output_file_path_2}'.")
