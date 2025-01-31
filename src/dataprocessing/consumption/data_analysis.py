@@ -66,8 +66,8 @@ def draw_plot_by_month(df):
 
 def main():
     df = read_data()
-    # draw_plot_by_day(df)
-    # draw_plot_by_month(df)
+    draw_plot_by_day(df)
+    draw_plot_by_month(df)
     real_data_analysis()
 
 

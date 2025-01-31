@@ -31,10 +31,22 @@ def get_family_member_factor():
     else:
         return np.random.randint(11, 18) / 10
 
+def get_daily_hour_factor(hour):
+    if 0 <= hour < 12:  # low using time 0:00-12:00
+        return np.random.randint(6, 9) / 10
+    else:  # high using time 12:00-24:00
+        return np.random.randint(9, 24) / 10
 
-def get_season_factor(hour):
+def get_season_factor(month):
+    if 0<=month<=5 or 10<=month<=11:
+        return np.random.randint(2.5, 9) / 10
+    else:
+        return np.random.randint(9, 18) / 10
 
-    return
+
+# def get_season_factor(hour):
+#
+#     return
 
 
 def generate_household(hh_id, year=2024):
@@ -52,19 +64,22 @@ def generate_household(hh_id, year=2024):
         "family_member": get_family_member_factor,
         "weekend_multiplier": 1 + np.random.uniform(-1, 1) * 0.3,
         "summer_boost": np.random.uniform(1.2, 1.8) if np.random.rand() < 0.7 else 1.0,
+
+        #"daily_boost": get_daily_hour_factor(df["hour"]),
+        #"season_boost": get_season_factor(df["season"]),
     }
 
     df["load"] = params["base_load"]
-
-    df["load"] += np.sin(df["hour"] / 24 * 2 * np.pi) * 0.5 + 0.5
+    #daily cycle
+    #df["load"] += np.sin(df["hour"] / 24 * 2 * np.pi) * 0.5 + 0.5
 
     # weekend boost
     df["load"] *= np.where(df["is_weekend"], params["weekend_multiplier"], 1)
 
     # TODO daily cycle
-
+    df["load"]*=get_daily_hour_factor(df["hour"])*(np.sin(df["hour"] / 24 * 2 * np.pi) * 0.5 + 0.5)
     # TODO seasonal fluctuation
-
+    df["load"]*=get_season_factor(df["season"])
 
     # add noise
     noise = skewnorm.rvs(5, loc=0, scale=0.1, size=len(df))
