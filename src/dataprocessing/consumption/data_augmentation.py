@@ -31,17 +31,49 @@ def get_family_member_factor():
     else:
         return np.random.randint(11, 18) / 10
 
+#获得当前所处小时时间后进行概率分部,以3kwh为基准1
 def get_daily_hour_factor(hour):
-    if 0 <= hour < 12:  # low using time 0:00-12:00
-        return np.random.randint(6, 9) / 10
-    else:  # high using time 12:00-24:00
-        return np.random.randint(9, 24) / 10
+    # 用电高峰15-21，概率分部为0.7-0.9 10%；0.9-2.1：20%；2.1-3.5:70%
+    if 15 <= hour < 21:
+        num = np.random.randint(1, 100)
+        if num <= 10:
+            return np.random.randint(7, 9) / 10
+        elif num <= 30:
+            return np.random.randint(9, 21) / 10
+        else:
+            return np.random.randint(21, 35) / 10
+    # 低峰2-10 概率分部为0.4-0.6：10%；0.9-1.1：10%；0.6-0.9:80%
+    elif 2<=hour<10:
+        num = np.random.randint(1, 100)
+        if num <= 10:
+            return np.random.randint(4, 6) / 10
+        elif num <= 20:
+            return np.random.randint(9, 11) / 10
+        else:
+            return np.random.randint(6, 9) / 10
+        # 其他时间
+    else:
+        num = np.random.randint(1, 100)
+        if num <= 20:
+            return np.random.randint(7, 9) / 10
+        elif num <= 70:
+            return np.random.randint(15, 25) / 10
+        else:
+            return np.random.randint(9, 15) / 10
 
 def get_season_factor(month):
-    if 0<=month<=5 or 10<=month<=11:
-        return np.random.randint(2.5, 9) / 10
-    else:
-        return np.random.randint(9, 18) / 10
+    if month in [0,1,10, 11]:  # winter
+        return np.random.uniform(0.7, 2)
+    elif month in [2,3, 4, 5]:  # spring
+        return np.random.uniform(0.7, 1.5)
+    else:  # summer6-8
+        return np.random.uniform(0.2, 0.7)  # 夏季用电较少
+
+# def get_season_factor(month):
+#     if 0<=month<=5 or 10<=month<=11:
+#         return np.random.randint(2.5, 9) / 10
+#     else:
+#         return np.random.randint(9, 18) / 10
 
 
 # def get_season_factor(hour):
@@ -61,25 +93,27 @@ def generate_household(hh_id, year=2024):
     params = {
         "base_load": 1,
         "consumption_level": get_consumption_level_factor(),
-        "family_member": get_family_member_factor,
+        "family_member": get_family_member_factor(),
         "weekend_multiplier": 1 + np.random.uniform(-1, 1) * 0.3,
         "summer_boost": np.random.uniform(1.2, 1.8) if np.random.rand() < 0.7 else 1.0,
 
-        #"daily_boost": get_daily_hour_factor(df["hour"]),
+        "daily_boost": get_daily_hour_factor(df["hour"]),
         #"season_boost": get_season_factor(df["season"]),
     }
-
+    print(params["daily_boost"])
     df["load"] = params["base_load"]
-    #daily cycle
-    #df["load"] += np.sin(df["hour"] / 24 * 2 * np.pi) * 0.5 + 0.5
+    # daily cycle
+    df["load"] += params["family_member"] * params["consumption_level"]
 
     # weekend boost
     df["load"] *= np.where(df["is_weekend"], params["weekend_multiplier"], 1)
 
-    # TODO daily cycle
-    df["load"]*=get_daily_hour_factor(df["hour"])*(np.sin(df["hour"] / 24 * 2 * np.pi) * 0.5 + 0.5)
-    # TODO seasonal fluctuation
-    df["load"]*=get_season_factor(df["season"])
+    # Apply hourly factor for daily cycle fluctuation
+    df["load"] *= df["hour"].apply(get_daily_hour_factor) * (
+            np.sin(df["hour"] / 24 * 2 * np.pi) * 0.5 + 0.5
+    )
+    # Apply seasonal factor based on season data
+    df["load"] *= df["season"].map(get_season_factor)
 
     # add noise
     noise = skewnorm.rvs(5, loc=0, scale=0.1, size=len(df))
