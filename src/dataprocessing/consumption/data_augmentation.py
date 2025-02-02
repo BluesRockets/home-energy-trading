@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy.stats import skewnorm
+
 import matplotlib.pyplot as plt
 
 NUMBER_OF_FAMILIES = 1
@@ -31,7 +32,7 @@ def get_family_member_factor():
     else:
         return np.random.randint(11, 18) / 10
 
-#获得当前所处小时时间后进行概率分部,以3kwh为基准1
+#获得当前所处小时时间后进行概率分部,以3kwh为基准1，注意！！！此处为单户家庭的每日用电习惯的概率分布，并非不同家庭的用电习惯
 def get_daily_hour_factor(hour):
     # 用电高峰15-21，概率分部为0.7-0.9 10%；0.9-2.1：20%；2.1-3.5:70%
     if 15 <= hour < 21:
@@ -97,10 +98,10 @@ def generate_household(hh_id, year=2024):
         "weekend_multiplier": 1 + np.random.uniform(-1, 1) * 0.3,
         "summer_boost": np.random.uniform(1.2, 1.8) if np.random.rand() < 0.7 else 1.0,
 
-        "daily_boost": get_daily_hour_factor(df["hour"]),
+        "daily_boost": df["hour"].apply(get_daily_hour_factor)
+
         #"season_boost": get_season_factor(df["season"]),
     }
-    print(params["daily_boost"])
     df["load"] = params["base_load"]
     # daily cycle
     df["load"] += params["family_member"] * params["consumption_level"]
@@ -109,11 +110,11 @@ def generate_household(hh_id, year=2024):
     df["load"] *= np.where(df["is_weekend"], params["weekend_multiplier"], 1)
 
     # Apply hourly factor for daily cycle fluctuation
-    df["load"] *= df["hour"].apply(get_daily_hour_factor) * (
-            np.sin(df["hour"] / 24 * 2 * np.pi) * 0.5 + 0.5
-    )
+    # df["load"] *= df["hour"].apply(get_daily_hour_factor) * (
+    #         np.sin(df["hour"] / 24 * 2 * np.pi) * 0.5 + 0.5
+    # )
     # Apply seasonal factor based on season data
-    df["load"] *= df["season"].map(get_season_factor)
+    # df["load"] *= df["season"].map(get_season_factor)
 
     # add noise
     noise = skewnorm.rvs(5, loc=0, scale=0.1, size=len(df))
@@ -129,3 +130,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
