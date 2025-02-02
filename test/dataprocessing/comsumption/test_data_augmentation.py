@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 
 NUMBER_OF_FAMILIES = 1
 
+
 def read_data():
     file_path = '../../../data/input/power_grid_energy_consumption_dataset.xlsx'
     sheet_name = 'UsageData'
@@ -13,23 +14,33 @@ def read_data():
 
     return df
 
+
 def get_consumption_level_factor():
     num = np.random.randint(1, 100)
     if num <= 20:
         return np.random.randint(6, 9) / 10
-    elif num <=60:
+    elif num <= 60:
         return np.random.randint(9, 11) / 10
     else:
         return np.random.randint(11, 18) / 10
+
 
 def get_family_member_factor():
     num = np.random.randint(1, 100)
     if num <= 20:
         return np.random.randint(6, 9) / 10
-    elif num <=60:
+    elif num <= 60:
         return np.random.randint(9, 11) / 10
     else:
         return np.random.randint(11, 18) / 10
+
+def get_peak_factor():
+    num = np.random.randint(1, 100)
+    if num <= 10:
+        return np.random.randint(-7, 3)
+    else:
+        return np.random.randint(10, 14)
+
 
 def get_daily_hour_factor(hour):
     """
@@ -61,6 +72,7 @@ def get_daily_hour_factor(hour):
         else:
             return np.random.randint(9, 12) / 10
 
+
 def get_season_factor(month):
     if month == 0:  # winter
         num = np.random.randint(1, 100)
@@ -70,7 +82,7 @@ def get_season_factor(month):
             return np.random.randint(12, 15) / 10
         else:
             return np.random.randint(15, 20) / 10
-    elif month == 1 or month==3 :  # spring&aut
+    elif month == 1 or month == 3:  # spring&aut
         num = np.random.randint(1, 100)
         if num <= 15:
             return np.random.randint(7, 10) / 10
@@ -88,7 +100,6 @@ def get_season_factor(month):
             return np.random.randint(5, 7) / 10
 
 
-
 def generate_household(hh_id, year=2024):
     index = pd.date_range(f"{year}-01-01", f"{year}-01-01 23:00", freq="h")
     df = pd.DataFrame(index=index)
@@ -102,14 +113,17 @@ def generate_household(hh_id, year=2024):
         "base_load": 1,
         "consumption_level": get_consumption_level_factor(),
         "family_member": get_family_member_factor(),
+
         "weekend_multiplier": 1 + np.random.uniform(-1, 1) * 0.3,
 
+        "peak_factor":get_peak_factor()
         # "summer_boost": np.random.uniform(1.2, 1.8) if np.random.rand() < 0.7 else 1.0,
-        #非矢量操作效率低，当前仅仅测试可优化
-        "daily_cycle": df["hour"].apply(get_daily_hour_factor),
-        #"season_boost": get_season_factor(df["season"]),
+        # 非矢量操作效率低，当前仅仅测试可优化
+
+        # "season_boost": get_season_factor(df["season"]),
     }
-    df["daily_cycle"]=params["daily_cycle"]
+
+    df["daily_cycle"] = df["hour"].apply(get_daily_hour_factor)
     # print(df)
     df["load"] = params["base_load"]
     # daily cycle
@@ -119,14 +133,14 @@ def generate_household(hh_id, year=2024):
     df["load"] *= np.where(df["is_weekend"], params["weekend_multiplier"], 1)
 
     # Apply hourly factor for daily cycle fluctuation
-    #适合参数相位10，周期22；相位12周期28
+    # 适合参数相位10，周期22；相位12周期28
     df["load"] *= (
-        #A取0.45，y轴位移1.1（目前最佳）或0.5,1.2
-            np.sin(2 * np.pi*(df["hour"] -12)/ 28) * 0.45 + 1.1
+        # A取0.45，y轴位移1.1（目前最佳）或0.5,1.2
+            np.sin(2 * np.pi * (df["hour"] - params["peak_factor"]) / 28) * 0.45 + 1.1
     )
     # Apply seasonal factor based on season data
-    df["season_cycle"] = df["season"].apply(get_daily_hour_factor)
-    df["load"] *=df["season_cycle"]
+    df["season_cycle"] = df["season"].apply(get_season_factor)
+    df["load"] *= df["season_cycle"]
     # add noise
     # noise = skewnorm.rvs(5, loc=0, scale=0.1, size=len(df))
     # df["load"] = np.abs(df["load"] + noise)
@@ -174,11 +188,12 @@ def plot_multiple_households(combined_df):
 # 主函数
 def main():
     # 生成多个家庭
-    num_households =8
+    num_households = 8
     combined_df = generate_multiple_households(num_households)
 
     # 绘制所有家庭的 Daily Boost 在一个图上显示
     plot_multiple_households(combined_df)
+
 
 if __name__ == "__main__":
     main()
