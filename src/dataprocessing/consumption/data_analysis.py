@@ -13,21 +13,18 @@ def read_data():
     return df
 
 def real_data_analysis():
-    df_real = pd.read_excel("../../../data/input/power_grid_energy_consumption_dataset.xlsx", sheet_name = 'UsageData')
+    df = pd.read_excel("../../../data/input/power_grid_energy_consumption_dataset.xlsx", sheet_name = 'UsageData', header=0, index_col=0)
 
-    print(df_real.describe())
+    df.index = pd.to_datetime(df.index, format="%Y.%m.%d")
 
-    sns.set_style("whitegrid")
-    fig, axes = plt.subplots(3, 1, figsize=(14, 12))
+    df = df.apply(lambda x: x.mask(x < 0.1, (x.shift(1) + x.shift(-1)) / 2))
 
-    # daily cycle
-    df_real.groupby(df_real.index.hour).mean().plot(ax=axes[0], title="average daily load curve")
+    may_data = df[df.index.month == 5]
+    df["base_load"] = may_data.sum(axis=1).mean() / 24
+    df["base_load2"] = may_data.rolling(window=7 * 24, min_periods=1).mean().mean(axis=1)
+    df["base_load3"] = may_data.quantile(q=0.25, axis=1)
+    print(df["base_load"].values, df["base_load2"].values, df["base_load3"].values)
 
-    # weekly cycle
-    df_real.groupby([df_real.index.dayofweek, df_real.index.hour]).mean().unstack(0).plot(ax=axes[1], title="weekend and weekday difference")
-
-    # monthly cycle
-    df_real.resample("M").mean().plot(ax=axes[2], title="seasonal cycle")
 
 def draw_plot_by_day(df):
     plt.figure(figsize=(10, 6))
@@ -51,7 +48,6 @@ def draw_plot_by_month(df):
         for item in df.iloc[30 * i, 1:25].values:
             consumption_daily += item
         total_consumption.append(consumption_daily)
-    print(total_consumption)
     plt.plot(np.arange(12), total_consumption, label=str(i) + "day (kWh)", marker='o', linestyle='-',
                  linewidth=2)
     plt.title("Energy Consumption Chart a day in 12 months", fontsize=16)
