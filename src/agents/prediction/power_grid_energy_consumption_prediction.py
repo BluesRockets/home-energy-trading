@@ -1,96 +1,114 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.svm import SVR
-import xgboost as xgb
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
 import os
 
-# Define RMSE function
+from keras.src.layers import LSTM, Conv1D, MaxPooling1D, Dropout, Dense
+from tensorflow.python.keras import Sequential
+# from tensorflow.python.keras.layers import Conv1D, MaxPooling1D, LSTM, Dropout, Dense
+# from tensorflow.python.keras.optimizers import Adam
+from tensorflow.python.keras.callbacks import EarlyStopping
+#from tensorflow.python.keras.layers import Conv1D, MaxPooling1D, Dropout, Dense
+from tensorflow.python.keras.optimizer_v1 import Adam
+
+
+# Define RMSE function (without scikit-learn)
 def rmse(actual, predicted):
-    return np.sqrt(mean_squared_error(actual, predicted))
+    error = np.subtract(actual, predicted)
+    sq_error = np.square(error)
+    mean_sq_error = np.mean(sq_error)
+    rmse_value = np.sqrt(mean_sq_error)
+    return rmse_value
+
+
+# Define R-squared function (without scikit-learn)
+def r2_score_fun(y_true, y_pred):
+    ss_total = np.sum(np.square(y_true - np.mean(y_true)))
+    ss_residual = np.sum(np.square(y_true - y_pred))
+    r2_value = 1 - (ss_residual / ss_total)
+    return r2_value
+
 
 # Step 1: Load dataset for model generation
-if not os.path.exists(model_data_path):
-    raise FileNotFoundError(f"Dataset for model generation not found at: {model_data_path}")
+data_path = '/Users/isparkyou/PycharmProjects/home-energy-trading/test/agents/prediction/combined_hourly_data.csv'
+if not os.path.exists(data_path):
+    raise FileNotFoundError(f"Dataset for model generation not found at: {data_path}")
 
-model_data = pd.read_csv(model_data_path)
+# Load data
+model_data = pd.read_csv(data_path)
 
-# Select only the required columns: lmd_totalirrad, lmd_temperature, and target column 'power'
-model_data = model_data[['lmd_totalirrad', 'lmd_temperature', 'power']]
+# Step 2: Preprocess the dataset
+# Ensure the 'date_time' column is in datetime format
+model_data['date_time'] = pd.to_datetime(model_data['date_time'])
+
+# Sort by date_time (just in case data is not sorted)
+model_data = model_data.sort_values(by='date_time')
+
+# Select required columns: lmd_totalirrad, lmd_temperature, and power
+model_data = model_data[['date_time', 'lmd_totalirrad', 'lmd_temperature', 'power']]
 
 # Handle missing values
 model_data = model_data.dropna()
 
-# Split dataset into features (X) and target (y)
-X = model_data[['lmd_totalirrad', 'lmd_temperature']]
-y = model_data['power']
+# Step 3: Split data into training and validation sets (80% train, 20% validation)
+split_index = int(len(model_data) * 0.8)
+train_data = model_data.iloc[:split_index]
+validation_data = model_data.iloc[split_index:]
 
-# Train-test split for model training
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# Extract features and target from training and validation sets
+X_train = train_data[['lmd_totalirrad', 'lmd_temperature']].values
+y_train = train_data['power'].values
 
-# Train base models
-print("Training base models...")
+X_val = validation_data[['lmd_totalirrad', 'lmd_temperature']].values
+y_val = validation_data['power'].values
 
-# Random Forest
-rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
-rf_model.fit(X_train, y_train)
-rf_predictions_train = rf_model.predict(X_train)
+# Reshape data for CNN and LSTM (3D input for time-series models)
+X_train_cnn = np.expand_dims(X_train, axis=1)  # Add 1 timestep
+X_val_cnn = np.expand_dims(X_val, axis=1)
 
-# Support Vector Machine (SVM)
-svm_model = SVR(kernel='rbf')
-svm_model.fit(X_train, y_train)
-svm_predictions_train = svm_model.predict(X_train)
+# Step 4: Define the CNN-LSTM model
+print("Building CNN-LSTM model...")
+model = Sequential([
+    Conv1D(filters=64, kernel_size=2, activation='relu', input_shape=(1, X_train.shape[1])),
+    MaxPooling1D(pool_size=2),
+    LSTM(units=50, return_sequences=False),
+    Dropout(0.2),
+    Dense(32, activation='relu'),
+    Dropout(0.2),
+    Dense(1)  # Output layer for regression
+])
 
-# XGBoost
-dtrain = xgb.DMatrix(data=X_train, label=y_train)
-xgb_model = xgb.train(params={'objective': 'reg:squarederror', 'eta': 0.1, 'max_depth': 3},
-                      dtrain=dtrain, num_boost_round=50)
-xgb_predictions_train = xgb_model.predict(dtrain)
+model.compile(optimizer=Adam(learning_rate=0.001), loss='mse', metrics=['mae'])
 
-# Prepare data for stacking
-stacking_train = pd.DataFrame({
-    'rf': rf_predictions_train,
-    'svm': svm_predictions_train,
-    'xgb': xgb_predictions_train,
-    'target': y_train
-})
+# Step 5: Train the model
+print("Training the model...")
+early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
-# Train meta-model (Linear Regression)
-print("Training meta-model for stacking...")
-meta_model = LinearRegression()
-meta_model.fit(stacking_train[['rf', 'svm', 'xgb']], stacking_train['target'])
+history = model.fit(
+    X_train_cnn, y_train,
+    validation_data=(X_val_cnn, y_val),
+    epochs=100,
+    batch_size=32,
+    callbacks=[early_stopping],
+    verbose=1
+)
 
-# Step 2: Load new data for prediction
-if not os.path.exists(prediction_data_path):
-    raise FileNotFoundError(f"Dataset for prediction not found at: {prediction_data_path}")
+# Evaluate model performance on validation set
+val_predictions = model.predict(X_val_cnn).flatten()
 
-prediction_data = pd.read_excel(prediction_data_path)
+# Step 6: Calculate Accuracy Metrics
+val_mse = np.mean((y_val - val_predictions) ** 2)
+val_rmse = rmse(y_val, val_predictions)
+val_r2 = r2_score_fun(y_val, val_predictions)
 
-# Select required columns for prediction: lmd_totalirrad and lmd_temperature
-prediction_data = prediction_data[['lmd_totalirrad', 'lmd_temperature']]
+print(f"Validation MSE: {val_mse:.4f}")
+print(f"Validation RMSE: {val_rmse:.4f}")
+print(f"Validation R² (Accuracy): {val_r2:.4f}")
 
-# Handle missing values in the prediction data
-prediction_data = prediction_data.dropna()
+# Step 7: Save predictions with timestamps for validation set
+output_path = '/data/output/production/validation_predictions_with_timestamps.xlsx'
 
-# Predict power using the trained stacking model
-print("Generating predictions...")
-rf_predictions = rf_model.predict(prediction_data)
-svm_predictions = svm_model.predict(prediction_data)
-xgb_predictions = xgb_model.predict(xgb.DMatrix(data=prediction_data))
+# Combine predictions with timestamps
+validation_data['predicted_power'] = val_predictions
+validation_data[['date_time', 'power', 'predicted_power']].to_excel(output_path, index=False)
 
-stacking_test = pd.DataFrame({
-    'rf': rf_predictions,
-    'svm': svm_predictions,
-    'xgb': xgb_predictions
-})
-
-final_predictions = meta_model.predict(stacking_test)
-
-# Step 3: Save predictions to file
-prediction_data['predicted_power'] = final_predictions
-prediction_data.to_excel(output_path, index=False)
-
-print(f"Predictions saved to: {output_path}")
+print(f"Validation predictions saved to: {output_path}")
