@@ -109,6 +109,9 @@ def generate_household(hh_id, year=2024):
 
     df["load"] = df["daily_cycle"]
 
+    df['daily_difference'] = df['load'].apply(assign_daily_parameters)
+    df['load'] *= df['daily_difference']
+
     # weekend boost
     df["load"] *= np.where(df["is_weekend"], params["weekend_multiplier"], 1)
 
@@ -229,7 +232,7 @@ def main():
 
     # plot_multiple_households(combined_df)
     plot_random_30_days_single_household(combined_df)
-    # plot_monthly_usage_by_household(combined_df)
+    plot_monthly_usage_by_household(combined_df)
 
     export_households_to_excel(combined_df, 'households_consumption_data')
 
