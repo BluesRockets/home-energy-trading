@@ -30,11 +30,12 @@ train_data = train_data.dropna()
 # **额外特征：添加小时信息**
 train_data['hour'] = train_data['date_time'].dt.hour / 23.0  # 归一化到 0-1
 
-# **标准化 (Standardization) 代替归一化**
+# **改成 StandardScaler()**
 scaler_X = StandardScaler()
 scaler_y = StandardScaler()
 train_data[['lmd_totalirrad', 'lmd_temperature']] = scaler_X.fit_transform(train_data[['lmd_totalirrad', 'lmd_temperature']])
 train_data[['power']] = scaler_y.fit_transform(train_data[['power']])
+
 
 # **扩充 totalirrad = 0 的数据**
 zero_data = train_data[train_data['lmd_totalirrad'] == 0]
@@ -108,14 +109,12 @@ for epoch in range(num_epochs):
         optimizer.zero_grad()
         outputs = model(batch_X)
 
-        # **自定义 Loss，确保 totalirrad=0 时 power 也必须接近 0**
         zero_mask = (batch_X[:, 0] == 0).float()
-        constraint_loss = torch.mean(zero_mask * outputs ** 2)  # 强制 power≈0
+        constraint_loss = torch.mean(zero_mask * outputs ** 2)
 
-        loss = criterion(outputs, batch_y) + 0.1 * constraint_loss  # 0.1 作为额外惩罚
+        loss = criterion(outputs, batch_y) + 0.1 * constraint_loss  # 仅对 `totalirrad=0` 时加约束
         loss.backward()
         optimizer.step()
-        epoch_loss += loss.item()
 
     model.eval()
     with torch.no_grad():
@@ -146,6 +145,13 @@ X_test_tensor = torch.tensor(X_test, dtype=torch.float32).to(device)
 # **进行预测**
 with torch.no_grad():
     test_predictions = model(X_test_tensor).cpu().numpy().flatten()
+
+# **检查反归一化**
+print("Predictions before inverse transform:", test_predictions.max(), test_predictions.min())
+# **反归一化 power**
+test_predictions = scaler_y.inverse_transform(test_predictions.reshape(-1, 1)).flatten()
+# **再次检查反归一化后的值**
+print("Predictions after inverse transform:", test_predictions.max(), test_predictions.min())
 
 # **保存预测结果**
 output_path = '/Users/isparkyou/PycharmProjects/home-energy-trading/data/output/production/validation_predictions_with_timestamps.xlsx'
