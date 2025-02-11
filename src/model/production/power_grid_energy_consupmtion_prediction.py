@@ -1,149 +1,137 @@
+import os
 import pandas as pd
 import numpy as np
-import os
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader, TensorDataset
-from sklearn.metrics import mean_squared_error, r2_score
+import xgboost as xgb
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
 
-# **Step 1: 设备选择**
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
-
-# **Step 2: 读取训练数据**
-train_data_path = '/Users/isparkyou/PycharmProjects/home-energy-trading/test/agents/prediction/converted_file.csv'
+# **Step 1: 读取训练数据**
+train_data_path = "/Users/isparkyou/PycharmProjects/home-energy-trading/test/agents/prediction/combined_hourly_data.csv"
 if not os.path.exists(train_data_path):
     raise FileNotFoundError(f"Training dataset not found at: {train_data_path}")
 
-# 读取训练数据
 train_data = pd.read_csv(train_data_path)
-train_data['date_time'] = pd.to_datetime(train_data['date_time'])
-train_data = train_data.sort_values(by='date_time')
-train_data = train_data[['date_time', 'lmd_totalirrad', 'lmd_temperature', 'power']]
-train_data = train_data.dropna()
+train_data["date_time"] = pd.to_datetime(train_data["date_time"])
 
-# **Step 3: 划分训练集和验证集**
-split_index = int(len(train_data) * 0.8)
-train_df = train_data.iloc[:split_index]
-val_df = train_data.iloc[split_index:]
+# **Step 2: 选择特征与目标**
+features = ["lmd_totalirrad", "lmd_temperature"]
+target = "power"
 
-# **提取特征和目标变量**
-X_train = train_df[['lmd_totalirrad', 'lmd_temperature']].values
-y_train = train_df['power'].values
-X_val = val_df[['lmd_totalirrad', 'lmd_temperature']].values
-y_val = val_df['power'].values
+X = train_data[features]
+y = train_data[target]
 
-# **转换为 PyTorch Tensors**
-X_train_tensor = torch.tensor(X_train, dtype=torch.float32).unsqueeze(-1).to(device)  # (batch_size, 2, 1)
-X_val_tensor = torch.tensor(X_val, dtype=torch.float32).unsqueeze(-1).to(device)
-y_train_tensor = torch.tensor(y_train, dtype=torch.float32).unsqueeze(-1).to(device)
-y_val_tensor = torch.tensor(y_val, dtype=torch.float32).unsqueeze(-1).to(device)
+# **Step 3: 处理 `NaN`**
+X = X.fillna(X.mean())
+y = y.fillna(y.mean())
 
-# **Step 4: 定义 CNN-LSTM 模型**
-class CNN_LSTM_Model(nn.Module):
-    def __init__(self):
-        super(CNN_LSTM_Model, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels=2, out_channels=64, kernel_size=1)
-        self.pool = nn.MaxPool1d(kernel_size=1, stride=1)
-        self.lstm = nn.LSTM(input_size=64, hidden_size=50, batch_first=True)
-        self.dropout = nn.Dropout(0.2)
-        self.fc1 = nn.Linear(50, 32)
-        self.fc2 = nn.Linear(32, 1)
+# **Step 4: 增加 `totalirrad=0` 的数据**
+zero_data = train_data[train_data["lmd_totalirrad"] == 0].copy()
+zero_data["power"] = 0  # 设定 power=0，强化模型学习
+train_data = pd.concat([train_data, zero_data, zero_data, zero_data])  # 复制 3 次，提高权重
 
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.pool(x)
-        x = x.permute(0, 2, 1)
-        x, _ = self.lstm(x)
-        x = self.dropout(x[:, -1, :])
-        x = torch.relu(self.fc1(x))
-        x = self.dropout(x)
-        x = self.fc2(x)
-        return x
+# **Step 5: 训练集 & 验证集**
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# **Step 5: 训练模型**
-model = CNN_LSTM_Model().to(device)
-criterion = nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+# **Step 6: 特征工程**
+X_train["lmd_totalirrad_sq"] = X_train["lmd_totalirrad"] ** 2  # 添加平方项
+X_train["interaction"] = X_train["lmd_totalirrad"] * X_train["lmd_temperature"]  # 交互项
+X_val["lmd_totalirrad_sq"] = X_val["lmd_totalirrad"] ** 2
+X_val["interaction"] = X_val["lmd_totalirrad"] * X_val["lmd_temperature"]
 
-print("Training the model...")
-num_epochs = 50
-batch_size = 32
+# **Step 7: 标准化**
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_val_scaled = scaler.transform(X_val)
 
-train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+# **Step 8: 定义 RMSE 评估函数**
+def rmse(y_actual, y_pred):
+    return np.sqrt(mean_squared_error(y_actual, y_pred))
 
-for epoch in range(num_epochs):
-    model.train()
-    epoch_loss = 0
-    for batch_X, batch_y in train_loader:
-        optimizer.zero_grad()
-        outputs = model(batch_X)
-        loss = criterion(outputs, batch_y)
-        loss.backward()
-        optimizer.step()
-        epoch_loss += loss.item()
+# **Step 9: 训练模型**
+# 1️⃣ **支持向量机（SVM）**
+svm_model = SVR()
+svm_model.fit(X_train_scaled, y_train)
+svm_preds = svm_model.predict(X_val_scaled)
 
-    model.eval()
-    with torch.no_grad():
-        val_outputs = model(X_val_tensor)
-        val_loss = criterion(val_outputs, y_val_tensor).item()
+# 2️⃣ **随机森林（Random Forest）**
+rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+rf_model.fit(X_train_scaled, y_train)
+rf_preds = rf_model.predict(X_val_scaled)
 
-    print(f"Epoch {epoch+1}/{num_epochs} - Training Loss: {epoch_loss/len(train_loader):.4f} - Validation Loss: {val_loss:.4f}")
+# 3️⃣ **XGBoost**
+dtrain = xgb.DMatrix(X_train_scaled, label=y_train)
+dval = xgb.DMatrix(X_val_scaled)
+xgb_model = xgb.train({"objective": "reg:squarederror", "eta": 0.1, "max_depth": 3}, dtrain, num_boost_round=50)
+xgb_preds = xgb_model.predict(dval)
 
-# **Step 6: 保存训练好的模型**
-model_save_path = '/Users/isparkyou/PycharmProjects/home-energy-trading/src/model/production/cnn_lstm_model.pth'
-torch.save(model.state_dict(), model_save_path)
-print(f"Model saved to: {model_save_path}")
+# **Step 10: 加权平均预测**
+weights = {"XGBoost": 0.4, "SVM": 0.3, "Random Forest": 0.3}
+combined_preds = (weights["XGBoost"] * xgb_preds) + (weights["SVM"] * svm_preds) + (weights["Random Forest"] * rf_preds)
 
-# ---------------------------------------------
-# **Step 7: 预测新数据**
-# ---------------------------------------------
-print("Loading model for prediction...")
+# **Step 11: 评估模型**
+val_rmse = rmse(y_val, combined_preds)
+val_mae = mean_absolute_error(y_val, combined_preds)
+val_r2 = r2_score(y_val, combined_preds)
 
-# **加载模型**
-model.load_state_dict(torch.load(model_save_path))
-model.eval()
+print(f"✅ Validation RMSE: {val_rmse:.4f}")
+print(f"✅ Validation MAE: {val_mae:.4f}")
+print(f"✅ Validation R²: {val_r2:.4f}")
 
-# **读取新数据**
-new_data_path = '/Users/isparkyou/PycharmProjects/home-energy-trading/data/input/solar_hourly_energy_production_dataset.xlsx'
-if not os.path.exists(new_data_path):
-    raise FileNotFoundError(f"New dataset for prediction not found at: {new_data_path}")
+# **Step 12: 训练结果可视化**
+plt.figure(figsize=(12, 5))
+plt.scatter(y_val, combined_preds, alpha=0.5, label="Predicted vs. Actual")
+plt.plot([y_val.min(), y_val.max()], [y_val.min(), y_val.max()], 'r', lw=2, label="Ideal Fit")
+plt.xlabel("Actual Power Output")
+plt.ylabel("Predicted Power Output")
+plt.title("Validation: Actual vs Predicted Power")
+plt.legend()
+plt.show()
 
-# **读取 Excel 并检查列名**
-new_data = pd.read_excel(new_data_path, header=0)
-print("Columns in new_data:", new_data.columns.tolist())  # ✅ 先检查列名
+# **Step 13: `totalirrad=0` 预测效果**
+zero_mask = X_val["lmd_totalirrad"] == 0
+zero_actual = y_val[zero_mask]
+zero_preds = combined_preds[zero_mask]
 
-# **修正列名**
-new_data.rename(columns=lambda x: x.strip().lower(), inplace=True)  # ✅ 去除空格并小写
-print("Renamed columns:", new_data.columns.tolist())
+plt.figure(figsize=(10, 5))
+plt.scatter(zero_actual, zero_preds, alpha=0.5, label="TotalIrrad = 0 Predictions")
+plt.axhline(0, color='red', linestyle="--", label="Ideal: Power = 0")
+plt.xlabel("Actual Power Output (TotalIrrad=0)")
+plt.ylabel("Predicted Power Output (TotalIrrad=0)")
+plt.title("Validation: TotalIrrad=0 Effect")
+plt.legend()
+plt.show()
 
-# **检查是否有 `date_time` 列**
-if 'date_time' not in new_data.columns:
-    raise KeyError("Error: Column 'date_time' not found in dataset! Check file format.")
+# **Step 14: 预测新数据**
+input_data_path = "/Users/isparkyou/PycharmProjects/home-energy-trading/data/input/solar_hourly_energy_production_dataset_converted.xlsx"
+if not os.path.exists(input_data_path):
+    raise FileNotFoundError(f"New dataset for prediction not found at: {input_data_path}")
 
-# **转换时间格式**
-new_data['date_time'] = pd.to_datetime(new_data['date_time'])
+new_data = pd.read_excel(input_data_path)
+new_data["date_time"] = pd.to_datetime(new_data["date_time"])
 
-# **检查数据是否正确加载**
-print("Shape of new_data:", new_data.shape)  # ✅ 预期 shape=(N, 3)
-new_data['date_time'] = pd.to_datetime(new_data['date_time'])
-new_data = new_data.sort_values(by='date_time')
-new_data = new_data[['date_time', 'lmd_totalirrad', 'lmd_temperature']]
-new_data = new_data.dropna()
-
-# **转换为 PyTorch Tensor**
-X_test = new_data[['lmd_totalirrad', 'lmd_temperature']].values
-X_test_tensor = torch.tensor(X_test, dtype=torch.float32).unsqueeze(-1).to(device)
+# 处理输入特征
+X_test = new_data[features]
+X_test = X_test.fillna(X_test.mean())
+X_test["lmd_totalirrad_sq"] = X_test["lmd_totalirrad"] ** 2
+X_test["interaction"] = X_test["lmd_totalirrad"] * X_test["lmd_temperature"]
+X_test_scaled = scaler.transform(X_test)
 
 # **进行预测**
-with torch.no_grad():
-    test_predictions = model(X_test_tensor).cpu().numpy().flatten()
+dtest = xgb.DMatrix(X_test_scaled)
+svm_test_preds = svm_model.predict(X_test_scaled)
+rf_test_preds = rf_model.predict(X_test_scaled)
+xgb_test_preds = xgb_model.predict(dtest)
 
-# **保存预测结果**
-output_path = '/Users/isparkyou/PycharmProjects/home-energy-trading/data/output/production/validation_predictions_with_timestamps.xlsx'
-new_data['predicted_power'] = test_predictions
-new_data[['date_time', 'predicted_power']].to_excel(output_path, index=False)
+# **加权平均预测**
+final_predictions = (weights["XGBoost"] * xgb_test_preds) + (weights["SVM"] * svm_test_preds) + (weights["Random Forest"] * rf_test_preds)
 
-print(f"Predictions saved to: {output_path}")
+# **Step 15: 保存预测结果**
+output_path = "/Users/isparkyou/PycharmProjects/home-energy-trading/data/output/production/validation_predictions_with_timestamps.xlsx"
+new_data["predicted_power"] = final_predictions
+new_data.to_excel(output_path, index=False)
+
+print(f"✅ Predictions saved successfully to: {output_path}")
