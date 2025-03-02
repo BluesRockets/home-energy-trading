@@ -221,9 +221,14 @@ def export_households_to_excel(combined_df, base_file_name="household_energy_dat
         with pd.ExcelWriter(excel_file_name, engine="openpyxl") as writer:
             for hh_id in current_family_ids:
                 household_data = combined_df[combined_df["hh_id"] == hh_id][["datetime", "load"]]
+
+                # change date format
+                # household_data["datetime"] = pd.to_datetime(household_data["datetime"], unit="d", origin="1899-12-30")
+
                 household_data.set_index("datetime", inplace=True)
                 household_data.to_excel(writer, sheet_name=f"Household_{hh_id}")
 
+                household_data["datetime"] = pd.to_datetime(household_data["datetime"])
         print(f"Save Successfully：{excel_file_name}")
 
 
@@ -231,8 +236,8 @@ def main():
     combined_df = generate_multiple_households(NUMBER_OF_FAMILIES)
 
     # plot_multiple_households(combined_df)
-    plot_random_30_days_single_household(combined_df)
-    plot_monthly_usage_by_household(combined_df)
+    # plot_random_30_days_single_household(combined_df)
+    # plot_monthly_usage_by_household(combined_df)
 
     export_households_to_excel(combined_df, 'households_consumption_data')
 
