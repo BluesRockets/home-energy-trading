@@ -52,7 +52,6 @@ class ProductionSenderAgent(agent.Agent):
 
         self.add_behaviour(self.SendMessageBehaviour(excel_path))
 
-
 async def main():
     sender = ProductionSenderAgent(
         "loganyang@xmpp.is",
