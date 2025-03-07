@@ -53,7 +53,6 @@ class ProductionSenderAgent(agent.Agent):
         excel_path = "../../../data/output/production/validation_predictions_with_timestamps.xlsx"
         self.add_behaviour(self.SendMessageBehaviour(excel_path))
 
-
 async def main():
     sender = ProductionSenderAgent(
         "loganyang@xmpp.is",
