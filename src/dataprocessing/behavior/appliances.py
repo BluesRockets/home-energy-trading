@@ -11,7 +11,7 @@ def get_days_in_month(date):
     return calendar.monthrange(date.year, date.month)[1]
 
 # 读取数据集
-file_path = '/Users/liuyang/Desktop/Agile project/appliance_consumption.csv'
+file_path = '../../../data/appliance_consumption.csv'
 data = pd.read_csv(file_path)
 
 # 提取时间特征
