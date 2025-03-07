@@ -53,7 +53,7 @@ class FacilitingAgent(agent.Agent):
 
 
 async def main():
-    faciliting = FacilitingAgent("venxwen@xmpp.is", "")
+    faciliting = FacilitingAgent("wxu20@xmpp.is", "@11223445566")
     await faciliting.start()
     await asyncio.sleep(99999999999)
     await faciliting.stop()
