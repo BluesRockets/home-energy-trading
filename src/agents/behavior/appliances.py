@@ -1,4 +1,4 @@
-#XMPP发送
+#XMPP
 import numpy as np
 import pandas as pd
 import calendar
@@ -11,7 +11,7 @@ def get_days_in_month(date):
     return calendar.monthrange(date.year, date.month)[1]
 
 # Read the dataset
-file_path = '../../../data/appliance_consumption.csv'
+file_path = 'data/input/appliance_consumption.csv'
 data = pd.read_csv(file_path)
 
 # Extract time features
@@ -102,7 +102,7 @@ future_data['hour_cos'] = np.cos(2 * np.pi * future_data['hour'] / 24)
 # Ensure that future_data contains all feature columns
 for feature in features:
     if feature not in future_data.columns:
-        future_data[feature] = 0  # 或者使用其他适当的默认值
+        future_data[feature] = 0
 # Rearrange the order of columns
 future_data = future_data[features]
 X_future = future_data.values
@@ -120,6 +120,23 @@ future_predictions_df['time'] = future_dates
 
 import asyncio
 import slixmpp
+import json
+
+# Convert predictions to structured JSON format
+def format_predictions_to_json(future_predictions_df):
+    predictions_list = []
+    for index, row in future_predictions_df.iterrows():
+        for appliance in target_appliances:
+            prediction = {
+                "timestamp": future_predictions_df['time'].iloc[index].strftime('%Y-%m-%dT%H:%M:%SZ'),
+                "type": appliance,
+                "production": round(row[appliance], 3),
+                "kwh": round(row[appliance], 3)  # Assuming 'production' is in kWh
+            }
+            predictions_list.append(prediction)
+    return json.dumps(predictions_list, indent=4)
+
+# XMPP message sending class
 class SendPrediction(slixmpp.ClientXMPP):
     def __init__(self, jid, password, recipient, message):
         super().__init__(jid, password)
@@ -131,14 +148,13 @@ class SendPrediction(slixmpp.ClientXMPP):
     async def start(self, event):
         self.send_presence()
         await self.get_roster()
-
         # Start a background task to send messages
         asyncio.create_task(self.send_messages_periodically())
 
     async def send_messages_periodically(self):
         while True:
             # Split long messages into 4 batches and send them
-            max_message_length = 500  #the longest message
+            max_message_length = 500  # the longest message length
             messages = [self.message[i:i + max_message_length] for i in range(0, len(self.message), max_message_length)]
 
             # Send in batches
@@ -146,24 +162,23 @@ class SendPrediction(slixmpp.ClientXMPP):
                 self.send_message(mto=self.recipient, mbody=msg, mtype='chat')
                 await asyncio.sleep(1)  # Wait 1 second after each send
 
-            #Sent once every 24 hours (86400 seconds)
+            # Send once every 24 hours (86400 seconds)
             await asyncio.sleep(86400)  # Wait 24 hours and send again
 
     def disconnected(self, event):
         print("Disconnected from XMPP server")
 
+# Format prediction data into JSON
 future_predictions_df = future_predictions_df.round(3)
-# Convert prediction data into text messages
-prediction_text = "Household Appliance Power Consumption Prediction:\n"
-prediction_text += future_predictions_df.to_string(index=False)
+prediction_json = format_predictions_to_json(future_predictions_df)
 
 # XMPP Account Information
 xmpp_sender = "appliance@xmpp.is"
 xmpp_password = "prediction5014"
-xmpp_recipient = "pplively@xmpp.is"  # Replace with the target XMPP account
+xmpp_recipient = "wxu20@xmpp.is"  # Replace with the target XMPP account
 
 # Sending XMPP Messages
-xmpp_client = SendPrediction(xmpp_sender, xmpp_password, xmpp_recipient, prediction_text)
+xmpp_client = SendPrediction(xmpp_sender, xmpp_password, xmpp_recipient, prediction_json)
 xmpp_client.connect()
 
 # Start the client event loop
