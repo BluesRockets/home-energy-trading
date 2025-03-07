@@ -27,13 +27,17 @@ class ProductionSenderAgent(agent.Agent):
             if self.index < len(self.data):
                 row = self.data.iloc[self.index].to_dict()
                 try:
-                    msg = Message(to="loganyang@xmpp.is")
-                    msg.body = json.dumps({
-                        "time": pd.to_datetime(row["date_time"]).isoformat(),
-                        "totalirrad": row["lmd_totalirrad"],
-                        "kWh": row["predicted_power"]
+                    msg = Message(to="wxu20@xmpp.is")
 
-                    })
+                    # 重新组织符合图片格式的 JSON
+                    message_data = {
+                        "type": "production",
+                        "timestamp": pd.to_datetime(row["date_time"]).isoformat(),
+                        "household_id": row.get("household_id", "default_house"),  # 读取 household_id, 如果无则默认
+                        "production": row["predicted_power"]  # 生产的能量值
+                    }
+
+                    msg.body = json.dumps(message_data)
                     await self.send(msg)
                     print(f"Sent: {msg.body}")
                     self.index += 1
@@ -47,10 +51,8 @@ class ProductionSenderAgent(agent.Agent):
     async def setup(self):
         print("Agent started")
         excel_path = "../../../data/output/production/validation_predictions_with_timestamps.xlsx"
-        # if not excel_path.exists():
-        #     raise FileNotFoundError(f"Excel file missing: {excel_path}")
-
         self.add_behaviour(self.SendMessageBehaviour(excel_path))
+
 
 async def main():
     sender = ProductionSenderAgent(
