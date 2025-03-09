@@ -37,9 +37,10 @@ class HouseholdConsumptionAgent(agent.Agent):
         def load_household_data(self):
             try:
                 # Read CSV files directly - now loading all three files
-                df1 = pd.read_csv('../../../data/output/appliances/household_data1.csv')
-                df2 = pd.read_csv('../../../data/output/appliances/household_data2.csv')
-                df3 = pd.read_csv('../../../data/output/appliances/household_data3.csv')
+                script_dir = os.path.dirname(__file__)
+                df1 = pd.read_csv(os.path.abspath(os.path.join(script_dir, '../../../data/output/appliances/household_data1.csv')))
+                df2 = pd.read_csv(os.path.abspath(os.path.join(script_dir, '../../../data/output/appliances/household_data2.csv')))
+                df3 = pd.read_csv(os.path.abspath(os.path.join(script_dir, '../../../data/output/appliances/household_data3.csv')))
 
                 # Ensure time column is in datetime format
                 df1['time'] = pd.to_datetime(df1['time'])
