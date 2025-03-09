@@ -22,18 +22,13 @@ class HouseholdConsumptionAgent(agent.Agent):
             # Get unique hours from the dataset
             if self.data is not None:
                 self.unique_hours = sorted(self.data['time'].unique())
-                print(f"Loaded {len(self.unique_hours)} unique hours of data")
-
-                # Get household IDs
                 self.household_ids = sorted(self.data['household_id'].unique())
-                print(f"Found {len(self.household_ids)} unique households")
-
                 # Initialize household index
                 self.current_household_index = 0
             else:
                 self.unique_hours = []
                 self.household_ids = []
-                print("No data loaded")
+                print("Error: No data loaded")
 
             # Flag to indicate if we're done
             self.all_data_sent = False
@@ -41,7 +36,6 @@ class HouseholdConsumptionAgent(agent.Agent):
         def load_household_data(self):
             try:
                 # Read CSV files directly
-                print("Reading household data files...")
                 df1 = pd.read_csv('../../../data/output/appliances/household_data1.csv')
                 df2 = pd.read_csv('../../../data/output/appliances/household_data2.csv')
 
@@ -51,8 +45,6 @@ class HouseholdConsumptionAgent(agent.Agent):
 
                 # Merge data
                 combined_df = pd.concat([df1, df2], ignore_index=True)
-                print(
-                    f"Data loaded successfully: {len(combined_df)} rows, covering from {combined_df['time'].min()} to {combined_df['time'].max()}")
                 return combined_df
 
             except FileNotFoundError as e:
@@ -63,22 +55,24 @@ class HouseholdConsumptionAgent(agent.Agent):
                 return None
 
         def format_household_message(self, timestamp, household_id, row):
-            """Format a household's data into a readable message"""
-            # Format timestamp as ISO
-            time_str = timestamp.strftime('%Y-%m-%dT%H:%M:%S')+ 'Z'
-
+            """Format a household's data into JSON message"""
             # Get appliance columns
             appliance_columns = [col for col in self.data.columns if col not in ['time', 'household_id']]
 
-            # Format appliance readings
-            appliance_parts = []
+            # Create JSON structure
+            message_dict = {
+                "type": "behavior",
+                "timestamp": timestamp.strftime('%Y-%m-%dT%H:%M:%S') + 'Z',
+                "household_id": household_id
+            }
+
+            # Add appliance readings
             for appliance in appliance_columns:
                 if appliance in row and not pd.isna(row[appliance]):
-                    appliance_parts.append(f"{appliance}: {row[appliance]:.3f}")
+                    message_dict[appliance] = round(float(row[appliance]), 3)
 
-            # Combine into final message
-            message = f"{time_str}, {household_id}, {', '.join(appliance_parts)}"
-            return message
+            # Convert to JSON string
+            return json.dumps(message_dict)
 
         async def run(self):
             # Check if we have data and if we haven't sent all hours yet
@@ -105,7 +99,8 @@ class HouseholdConsumptionAgent(agent.Agent):
                 msg.body = message_text
                 await self.send(msg)
 
-                print(f"Sent data for {current_household} at {current_hour}")
+
+                print(f"{message_text}")
 
             # Move to next household
             self.current_household_index += 1
@@ -114,18 +109,16 @@ class HouseholdConsumptionAgent(agent.Agent):
             if self.current_household_index >= len(self.household_ids):
                 self.current_household_index = 0
                 self.current_hour_index += 1
-                print(f"Completed sending data for hour {current_hour}")
 
             # Check if we've processed all hours
             if self.current_hour_index >= len(self.unique_hours):
-                print("All data has been sent")
+                print("All behavior data has been sent")
                 self.all_data_sent = True
 
             # Wait before sending next message
             await asyncio.sleep(SEND_INTERVAL)
 
     async def setup(self):
-        print(f"HouseholdConsumptionAgent launched with JID: {self.jid}")
         send_behavior = self.SendDataBehaviour()
         self.add_behaviour(send_behavior)
 
@@ -136,18 +129,16 @@ async def main():
 
     # Start the agent
     await sender.start()
-    print("Agent started. Ctrl+C to stop.")
 
     try:
         # Keep the agent running until all data is sent
         while not sender.behaviours[0].is_killed():
             await asyncio.sleep(1)
     except KeyboardInterrupt:
-        print("Agent stopping due to keyboard interrupt...")
+        pass
     finally:
         # Stop the agent
         await sender.stop()
-        print("Agent stopped.")
 
 
 if __name__ == "__main__":
