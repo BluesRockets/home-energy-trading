@@ -1,185 +1,174 @@
-#XMPP
-import numpy as np
-import pandas as pd
-import calendar
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout, Bidirectional
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import EarlyStopping
-# Define a function to get the number of days per month
-def get_days_in_month(date):
-    return calendar.monthrange(date.year, date.month)[1]
-
-# Read the dataset
-file_path = 'data/input/appliance_consumption.csv'
-data = pd.read_csv(file_path)
-
-# Extract time features
-data['time'] = pd.to_datetime(data['time'])
-data['month'] = data['time'].dt.month
-data['day'] = data['time'].dt.day
-data['hour'] = data['time'].dt.hour
-data['is_weekend'] = (data['time'].dt.dayofweek >= 5).astype(int)
-data['days_in_month'] = data['time'].apply(get_days_in_month)
-
-# Use periodic encoding to handle date features
-data['month_sin'] = np.sin(2 * np.pi * data['month'] / 12)
-data['month_cos'] = np.cos(2 * np.pi * data['month'] / 12)
-data['day_sin'] = np.sin(2 * np.pi * data['day'] / data['days_in_month'])
-data['day_cos'] = np.cos(2 * np.pi * data['day'] / data['days_in_month'])
-data['hour_sin'] = np.sin(2 * np.pi * data['hour'] / 24)
-data['hour_cos'] = np.cos(2 * np.pi * data['hour'] / 24)
-data.columns = [col.replace(' [kW]', '').strip() for col in data.columns]
-
-# Locking features and targets
-features = ['Dishwasher', 'Furnace', 'Home office', 'Fridge', 'Wine cellar',
-            'Garage door', 'Kitchen', 'Living room', 'temperature', 'month_sin',
-            'month_cos', 'day_sin', 'day_cos', 'hour_sin', 'hour_cos', 'is_weekend']
-data_goal = data[features]
-target_appliances = features[:8]
-
-# Divide into training set and test set
-train_size = int(len(data_goal) * 0.8)
-train_data = data_goal[:train_size]
-test_data = data_goal[train_size:].copy()
-
-# Manually construct a time column
-test_data.loc[:, 'time'] = pd.date_range(start='2024-01-01', periods=len(test_data), freq='h')
-
-X_train = train_data[features].values
-X_test = test_data[features].values
-
-y_train = train_data[target_appliances].values
-y_test = test_data[target_appliances].values
-
-# Define LSTM input format function
-def lstm_input(X, y, timesteps=24):
-    X_lstm, y_lstm = [], []
-    for i in range(timesteps, len(X)):
-        X_lstm.append(X[i - timesteps:i])
-        y_lstm.append(y[i])
-    return np.array(X_lstm), np.array(y_lstm)
-
-# LSTM
-X_train_lstm, y_train_lstm = lstm_input(X_train, y_train, timesteps=24)
-X_test_lstm, y_test_lstm = lstm_input(X_test, y_test, timesteps=24)
-
-model = Sequential()
-model.add(Bidirectional(LSTM(units=64, return_sequences=True), input_shape=(X_train_lstm.shape[1], X_train_lstm.shape[2])))
-model.add(Dropout(0.2))
-model.add(Bidirectional(LSTM(units=32, return_sequences=False)))
-model.add(Dropout(0.2))
-model.add(Dense(16, activation='relu'))
-model.add(Dense(y_train_lstm.shape[1]))
-optimizer = Adam(learning_rate=0.0005)
-model.compile(optimizer=optimizer, loss='mean_squared_error')
-early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-model.summary()
-
-# train the model
-batch_size = min(16, X_train_lstm.shape[0])
-model.fit(X_train_lstm, y_train_lstm, epochs=40, batch_size=batch_size, validation_split=0.2, callbacks=[early_stopping])
-
-# Get the last 24 training data
-last_24_train_data = X_train[-24:]
-# Generate input data for the next 24 hours
-future_dates = pd.date_range(start=test_data['time'].max(), periods=24, freq='h')
-future_data = pd.DataFrame({
-    'time': future_dates,
-    'hour': future_dates.hour,
-    'day': future_dates.day,
-    'day_of_week': future_dates.dayofweek,
-    'month': future_dates.month
-})
-future_data['is_weekend'] = (future_data['day_of_week'] >= 5).astype(int)
-future_data['days_in_month'] = future_data['time'].apply(get_days_in_month)
-future_data['month_sin'] = np.sin(2 * np.pi * future_data['month'] / 12)
-future_data['month_cos'] = np.cos(2 * np.pi * future_data['month'] / 12)
-future_data['day_sin'] = np.sin(2 * np.pi * future_data['day'] / future_data['days_in_month'])
-future_data['day_cos'] = np.cos(2 * np.pi * future_data['day'] / future_data['days_in_month'])
-future_data['hour_sin'] = np.sin(2 * np.pi * future_data['hour'] / 24)
-future_data['hour_cos'] = np.cos(2 * np.pi * future_data['hour'] / 24)
-# Ensure that future_data contains all feature columns
-for feature in features:
-    if feature not in future_data.columns:
-        future_data[feature] = 0
-# Rearrange the order of columns
-future_data = future_data[features]
-X_future = future_data.values
-# Concatenate the last 24 training data and future data
-X_future_with_history = np.vstack([last_24_train_data, X_future])
-# Convert input data to LSTM format
-X_future_lstm, _ = lstm_input(X_future_with_history, np.zeros((X_future_with_history.shape[0], y_train.shape[1])), timesteps=24)
-# Only take the forecast results for the next 24 hours
-future_predictions = model.predict(X_future_lstm)[-24:]
-
-# Output the forecast results for the next 24 hours
-future_predictions_df = pd.DataFrame(future_predictions, columns=target_appliances)
-future_predictions_df[future_predictions_df < 0] = 0
-future_predictions_df['time'] = future_dates
 
 import asyncio
-import slixmpp
+import pandas as pd
+import os
+import time
+from spade import agent, behaviour
+from spade.message import Message
 import json
+from datetime import datetime, timedelta
 
-# Convert predictions to structured JSON format
-def format_predictions_to_json(future_predictions_df):
-    predictions_list = []
-    for index, row in future_predictions_df.iterrows():
-        for appliance in target_appliances:
-            prediction = {
-                "timestamp": future_predictions_df['time'].iloc[index].strftime('%Y-%m-%dT%H:%M:%SZ'),
-                "type": appliance,
-                "production": round(row[appliance], 3),
-                "kwh": round(row[appliance], 3)  # Assuming 'production' is in kWh
+# Set interval between messages in seconds
+SEND_INTERVAL = 1
+
+
+class HouseholdConsumptionAgent(agent.Agent):
+    class SendDataBehaviour(behaviour.CyclicBehaviour):
+        def __init__(self):
+            super().__init__()
+            # Load data files from the current directory
+            self.data = self.load_household_data()
+            # Track current hour index for sending data
+            self.current_hour_index = 0
+            # Get unique hours from the dataset
+            if self.data is not None:
+                self.unique_hours = sorted(self.data['time'].unique())
+                self.household_ids = sorted(self.data['household_id'].unique())
+                # Initialize household index
+                self.current_household_index = 0
+            else:
+                self.unique_hours = []
+                self.household_ids = []
+                print("Error: No data loaded")
+
+            # Flag to indicate if we're done
+            self.all_data_sent = False
+
+        def load_household_data(self):
+            try:
+                # Read CSV files directly - now loading all three files
+                df1 = pd.read_csv('../../../data/output/appliances/household_data1.csv')
+                df2 = pd.read_csv('../../../data/output/appliances/household_data2.csv')
+                df3 = pd.read_csv('../../../data/output/appliances/household_data3.csv')
+
+                # Ensure time column is in datetime format
+                df1['time'] = pd.to_datetime(df1['time'])
+                df2['time'] = pd.to_datetime(df2['time'])
+                df3['time'] = pd.to_datetime(df3['time'])
+
+                # Merge data
+                combined_df = pd.concat([df1, df2, df3], ignore_index=True)
+                return combined_df
+
+            except FileNotFoundError as e:
+                print(f"Error: Could not find file - {e}")
+                return None
+            except Exception as e:
+                print(f"Error loading data: {str(e)}")
+                return None
+
+        def get_future_hours_data(self, timestamp, household_id, appliance, hours=23):
+            """从CSV数据中获取未来指定小时数的预测数据"""
+            future_data = []
+
+            # 获取当前时间之后的23个小时
+            future_times = [timestamp + timedelta(hours=i + 1) for i in range(hours)]
+
+            # 为每个未来时间点找到对应的数据
+            for future_time in future_times:
+                future_row = self.data[(self.data['time'] == future_time) &
+                                       (self.data['household_id'] == household_id)]
+
+                if not future_row.empty and appliance in future_row.columns:
+                    # 获取该时间点的设备数据
+                    value = round(float(future_row[appliance].iloc[0]), 3)
+                    future_data.append(value)
+                else:
+                    # 如果找不到数据，使用0作为占位符
+                    future_data.append(0.0)
+
+            return future_data
+
+        def format_household_message(self, timestamp, household_id, row):
+            """Format a household's data into JSON message with future predictions"""
+            # Get appliance columns
+            appliance_columns = [col for col in self.data.columns if col not in ['time', 'household_id']]
+
+            # Create JSON structure
+            message_dict = {
+                "type": "behavior",
+                "timestamp": timestamp.strftime('%Y-%m-%dT%H:%M:%S') + 'Z',
+                "household_id": household_id,
+                "data": {}
             }
-            predictions_list.append(prediction)
-    return json.dumps(predictions_list, indent=4)
 
-# XMPP message sending class
-class SendPrediction(slixmpp.ClientXMPP):
-    def __init__(self, jid, password, recipient, message):
-        super().__init__(jid, password)
-        self.recipient = recipient
-        self.message = message
-        self.add_event_handler("session_start", self.start)
-        self.add_event_handler("disconnected", self.disconnected)
+            # Add current and future appliance readings
+            for appliance in appliance_columns:
+                if appliance in row and not pd.isna(row[appliance]):
+                    current_value = round(float(row[appliance]), 3)
+                    # 从CSV数据中获取未来23小时的预测值
+                    future_values = self.get_future_hours_data(timestamp, household_id, appliance)
+                    # 当前值加上未来23小时的预测值
+                    message_dict["data"][appliance] = [current_value] + future_values
 
-    async def start(self, event):
-        self.send_presence()
-        await self.get_roster()
-        # Start a background task to send messages
-        asyncio.create_task(self.send_messages_periodically())
+            # Convert to JSON string
+            return json.dumps(message_dict)
 
-    async def send_messages_periodically(self):
-        while True:
-            # Split long messages into 4 batches and send them
-            max_message_length = 500  # the longest message length
-            messages = [self.message[i:i + max_message_length] for i in range(0, len(self.message), max_message_length)]
+        async def run(self):
+            # Check if we have data and if we haven't sent all hours yet
+            if self.data is None or self.all_data_sent:
+                self.kill()
+                return
 
-            # Send in batches
-            for msg in messages:
-                self.send_message(mto=self.recipient, mbody=msg, mtype='chat')
-                await asyncio.sleep(1)  # Wait 1 second after each send
+            # Get current hour to process
+            current_hour = self.unique_hours[self.current_hour_index]
+            current_household = self.household_ids[self.current_household_index]
 
-            # Send once every 24 hours (86400 seconds)
-            await asyncio.sleep(86400)  # Wait 24 hours and send again
+            # Filter data for this hour and household
+            hour_data = self.data[(self.data['time'] == current_hour) &
+                                  (self.data['household_id'] == current_household)]
 
-    def disconnected(self, event):
-        print("Disconnected from XMPP server")
+            if not hour_data.empty:
+                # Format message with all appliances for this household
+                message_text = self.format_household_message(
+                    current_hour, current_household, hour_data.iloc[0])
 
-# Format prediction data into JSON
-future_predictions_df = future_predictions_df.round(3)
-prediction_json = format_predictions_to_json(future_predictions_df)
+                # Create and send the message
+                msg = Message(to="wxu20@xmpp.is")  # Recipient
+                msg.body = message_text
+                await self.send(msg)
 
-# XMPP Account Information
-xmpp_sender = "appliance@xmpp.is"
-xmpp_password = "prediction5014"
-xmpp_recipient = "wxu20@xmpp.is"  # Replace with the target XMPP account
+                # Print the message in console
+                print(f"{message_text}")
 
-# Sending XMPP Messages
-xmpp_client = SendPrediction(xmpp_sender, xmpp_password, xmpp_recipient, prediction_json)
-xmpp_client.connect()
+            # Move to next household
+            self.current_household_index += 1
 
-# Start the client event loop
-asyncio.get_event_loop().run_until_complete(xmpp_client.process(forever=True))
+            # If we've processed all households for this hour, move to next hour
+            if self.current_household_index >= len(self.household_ids):
+                self.current_household_index = 0
+                self.current_hour_index += 1
+
+            # Check if we've processed all hours
+            if self.current_hour_index >= len(self.unique_hours):
+                self.all_data_sent = True
+
+            # Wait before sending next message
+            await asyncio.sleep(SEND_INTERVAL)
+
+    async def setup(self):
+        send_behavior = self.SendDataBehaviour()
+        self.add_behaviour(send_behavior)
+
+
+async def main():
+    # Create agent with credentials
+    sender = HouseholdConsumptionAgent("appliance@xmpp.is", "prediction5014")
+
+    # Start the agent
+    await sender.start()
+
+    try:
+        # Keep the agent running until all data is sent
+        while not sender.behaviours[0].is_killed():
+            await asyncio.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # Stop the agent
+        await sender.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
