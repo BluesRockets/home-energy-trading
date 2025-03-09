@@ -5,7 +5,7 @@ import time
 from spade import agent, behaviour
 from spade.message import Message
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Set interval between messages in seconds
 SEND_INTERVAL = 1
@@ -35,16 +35,18 @@ class HouseholdConsumptionAgent(agent.Agent):
 
         def load_household_data(self):
             try:
-                # Read CSV files directly
+                # Read CSV files directly - now loading all three files
                 df1 = pd.read_csv('../../../data/output/appliances/household_data1.csv')
                 df2 = pd.read_csv('../../../data/output/appliances/household_data2.csv')
+                df3 = pd.read_csv('../../../data/output/appliances/household_data3.csv')
 
                 # Ensure time column is in datetime format
                 df1['time'] = pd.to_datetime(df1['time'])
                 df2['time'] = pd.to_datetime(df2['time'])
+                df3['time'] = pd.to_datetime(df3['time'])
 
                 # Merge data
-                combined_df = pd.concat([df1, df2], ignore_index=True)
+                combined_df = pd.concat([df1, df2, df3], ignore_index=True)
                 return combined_df
 
             except FileNotFoundError as e:
@@ -54,8 +56,30 @@ class HouseholdConsumptionAgent(agent.Agent):
                 print(f"Error loading data: {str(e)}")
                 return None
 
+        def get_future_hours_data(self, timestamp, household_id, appliance, hours=23):
+            """从CSV数据中获取未来指定小时数的预测数据"""
+            future_data = []
+
+            # 获取当前时间之后的23个小时
+            future_times = [timestamp + timedelta(hours=i + 1) for i in range(hours)]
+
+            # 为每个未来时间点找到对应的数据
+            for future_time in future_times:
+                future_row = self.data[(self.data['time'] == future_time) &
+                                       (self.data['household_id'] == household_id)]
+
+                if not future_row.empty and appliance in future_row.columns:
+                    # 获取该时间点的设备数据
+                    value = round(float(future_row[appliance].iloc[0]), 3)
+                    future_data.append(value)
+                else:
+                    # 如果找不到数据，使用0作为占位符
+                    future_data.append(0.0)
+
+            return future_data
+
         def format_household_message(self, timestamp, household_id, row):
-            """Format a household's data into JSON message"""
+            """Format a household's data into JSON message with future predictions"""
             # Get appliance columns
             appliance_columns = [col for col in self.data.columns if col not in ['time', 'household_id']]
 
@@ -63,13 +87,18 @@ class HouseholdConsumptionAgent(agent.Agent):
             message_dict = {
                 "type": "behavior",
                 "timestamp": timestamp.strftime('%Y-%m-%dT%H:%M:%S') + 'Z',
-                "household_id": household_id
+                "household_id": household_id,
+                "data": {}
             }
 
-            # Add appliance readings
+            # Add current and future appliance readings
             for appliance in appliance_columns:
                 if appliance in row and not pd.isna(row[appliance]):
-                    message_dict[appliance] = round(float(row[appliance]), 3)
+                    current_value = round(float(row[appliance]), 3)
+                    # 从CSV数据中获取未来23小时的预测值
+                    future_values = self.get_future_hours_data(timestamp, household_id, appliance)
+                    # 当前值加上未来23小时的预测值
+                    message_dict["data"][appliance] = [current_value] + future_values
 
             # Convert to JSON string
             return json.dumps(message_dict)
@@ -77,7 +106,6 @@ class HouseholdConsumptionAgent(agent.Agent):
         async def run(self):
             # Check if we have data and if we haven't sent all hours yet
             if self.data is None or self.all_data_sent:
-                print("All data sent or no data available")
                 self.kill()
                 return
 
@@ -99,7 +127,7 @@ class HouseholdConsumptionAgent(agent.Agent):
                 msg.body = message_text
                 await self.send(msg)
 
-
+                # Print the message in console
                 print(f"{message_text}")
 
             # Move to next household
@@ -112,7 +140,6 @@ class HouseholdConsumptionAgent(agent.Agent):
 
             # Check if we've processed all hours
             if self.current_hour_index >= len(self.unique_hours):
-                print("All behavior data has been sent")
                 self.all_data_sent = True
 
             # Wait before sending next message
