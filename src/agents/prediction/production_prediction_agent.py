@@ -16,17 +16,24 @@ class ProductionSenderAgent(agent.Agent):
             self.load_data()  # 读取数据
 
         def load_data(self):
-            """ 读取 4 个 Excel 文件，每个文件有 25 个 Sheets """
+            """ 读取 4 个 Excel 文件，每个文件有 25 个 Sheets，并将 household_id 转换为纯数字 """
             try:
                 for file_path in self.excel_paths:
                     excel_data = pd.ExcelFile(file_path)
                     for sheet in excel_data.sheet_names:
+                        try:
+                            # 提取数字部分，假设所有 sheet_name 格式是 house_XXX
+                            household_id = int(sheet.replace("house_", ""))  # 去掉 'house_' 并转换为整数
+                        except ValueError:
+                            print(f"Skipping sheet {sheet} in {file_path} (not a valid numeric ID).")
+                            continue
+
                         df = pd.read_excel(excel_data, sheet_name=sheet)
                         if "date_time" in df.columns and "predicted_power" in df.columns:
-                            self.household_data[sheet] = df
-                            self.household_indices[sheet] = 0  # 初始化索引
+                            self.household_data[household_id] = df  # 以整数作为键
+                            self.household_indices[household_id] = 0  # 初始化索引
                         else:
-                            print(f"Skipping {sheet} in {file_path} due to missing columns.")
+                            print(f"Skipping sheet {sheet} in {file_path} due to missing columns.")
             except Exception as e:
                 print(f"Error loading Excel files: {e}")
                 self.kill()
@@ -44,13 +51,13 @@ class ProductionSenderAgent(agent.Agent):
                 if index < len(df):
                     row = df.iloc[index].to_dict()
                     try:
-                        msg = Message(to="loganyang@xmpp.is")  # 目标 XMPP 地址 # "wxu20@xmpp.is"
+                        msg = Message(to="loganyang@xmpp.is")  # 目标 XMPP 地址
 
                         # 组织 JSON 消息
                         message_data = {
                             "type": "production",
                             "timestamp": pd.to_datetime(row["date_time"]).isoformat(),
-                            "household_id": household_id,
+                            "household_id": household_id,  # 现在是整数
                             "production": row["predicted_power"]
                         }
 
@@ -71,14 +78,14 @@ class ProductionSenderAgent(agent.Agent):
 
     async def setup(self):
         print("Agent started")
-        script_dir = os.path.dirname(__file__)
         excel_paths = [
-            os.path.abspath(os.path.join(script_dir, "../../../data/output/production/validation_predictions_part_1.xlsx")),
-            os.path.abspath(os.path.join(script_dir, "../../../data/output/production/validation_predictions_part_2.xlsx")),
-            os.path.abspath(os.path.join(script_dir, "../../../data/output/production/validation_predictions_part_3.xlsx")),
-            os.path.abspath(os.path.join(script_dir, "../../../data/output/production/validation_predictions_part_4.xlsx"))
+            "../../../data/output/production/validation_predictions_part_1.xlsx",
+            "../../../data/output/production/validation_predictions_part_2.xlsx",
+            "../../../data/output/production/validation_predictions_part_3.xlsx",
+            "../../../data/output/production/validation_predictions_part_4.xlsx"
         ]
         self.add_behaviour(self.SendMessageBehaviour(excel_paths))
+
 
 async def main():
     sender = ProductionSenderAgent(
