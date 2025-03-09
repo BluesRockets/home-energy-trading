@@ -71,11 +71,12 @@ class ProductionSenderAgent(agent.Agent):
 
     async def setup(self):
         print("Agent started")
+        script_dir = os.path.dirname(__file__)
         excel_paths = [
-            "../../../data/output/production/validation_predictions_part_1.xlsx",
-            "../../../data/output/production/validation_predictions_part_2.xlsx",
-            "../../../data/output/production/validation_predictions_part_3.xlsx",
-            "../../../data/output/production/validation_predictions_part_4.xlsx"
+            os.path.abspath(os.path.join(script_dir, "../../../data/output/production/validation_predictions_part_1.xlsx")),
+            os.path.abspath(os.path.join(script_dir, "../../../data/output/production/validation_predictions_part_2.xlsx")),
+            os.path.abspath(os.path.join(script_dir, "../../../data/output/production/validation_predictions_part_3.xlsx")),
+            os.path.abspath(os.path.join(script_dir, "../../../data/output/production/validation_predictions_part_4.xlsx"))
         ]
         self.add_behaviour(self.SendMessageBehaviour(excel_paths))
 
