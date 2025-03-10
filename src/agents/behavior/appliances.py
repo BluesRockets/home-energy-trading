@@ -35,8 +35,8 @@ class HouseholdConsumptionAgent(agent.Agent):
                 self.household_ids = []
 
         def load_household_data(self):
-            try:
-                # 使用GitHub版本的路径格式
+            try:             
+                # Read CSV files directly - now loading all three files
                 script_dir = os.path.dirname(__file__)
                 df1 = pd.read_csv(os.path.abspath(os.path.join(script_dir, '../../../data/output/appliances/household_data1.csv')))
                 df2 = pd.read_csv(os.path.abspath(os.path.join(script_dir, '../../../data/output/appliances/household_data2.csv')))

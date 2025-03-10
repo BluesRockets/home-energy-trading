@@ -21,28 +21,28 @@ class FacilitingAgent(agent.Agent):
                         print(f"Unknown household ID: {household_id}")
                         return
 
-                    match data.get("type"):
-                        case "consumption":
-                            consumption = float(data["consumption"])
-                            households[household_id]["remaining"] -= consumption
-                            if households[household_id]["remaining"] <= 0:
-                                households[household_id]["remaining"] = 0
-                                households[household_id]["status"] = "0"
-                            print(f"Updated {household_id}: {households[household_id]}")
+                    message_type = data.get("type")
+                    if message_type == "consumption":
+                        consumption = float(data["consumption"])
+                        households[household_id]["remaining"] -= consumption
+                        if households[household_id]["remaining"] <= 0:
+                            households[household_id]["remaining"] = 0
+                            households[household_id]["status"] = "0"
+                        print(f"Updated {household_id}: {households[household_id]}")
 
-                        case "production":
-                            production = float(data["production"])
-                            households[household_id]["remaining"] += production
-                            if households[household_id]["remaining"] > 0:
-                                households[household_id]["status"] = "1"
-                            print(f"Updated {household_id}: {households[household_id]}")
+                    elif message_type == "production":
+                        production = float(data["production"])
+                        households[household_id]["remaining"] += production
+                        if households[household_id]["remaining"] > 0:
+                            households[household_id]["status"] = "1"
+                        print(f"Updated {household_id}: {households[household_id]}")
 
-                        case "behavior":
-                            #这里可能需要修改
-                            households[household_id]["behavior"].append(data)
+                    elif message_type == "behavior":
+                        # 这里可能需要修改
+                        households[household_id]["behavior"].append(data)
 
-                        case _:
-                            print(f"Received unknown message type: {data.get('type')}")
+                    else:
+                        print(f"Received unknown message type: {message_type}")
 
                 except Exception as e:
                     print(f"Error processing message: {e}")
@@ -53,7 +53,7 @@ class FacilitingAgent(agent.Agent):
 
 
 async def main():
-    faciliting = FacilitingAgent("wxu20@xmpp.is", "@11223445566")
+    faciliting = FacilitingAgent("wxu20@xmpp.is", "@112233445566")
     await faciliting.start()
     await asyncio.sleep(99999999999)
     await faciliting.stop()
