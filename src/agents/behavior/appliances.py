@@ -1,4 +1,3 @@
-
 import asyncio
 import pandas as pd
 import os
@@ -8,143 +7,162 @@ from spade.message import Message
 import json
 from datetime import datetime, timedelta
 
-# Set interval between messages in seconds
-SEND_INTERVAL = 1
+# 设置发送模式参数
+SEND_INTERVAL = 1  # 每批数据的发送周期（秒）
+HOURS_STEP = 1  # 每次向前移动1小时
+MAX_CONCURRENT_TASKS = 20  # 最大并发任务数，避免创建过多任务导致资源耗尽
 
 
 class HouseholdConsumptionAgent(agent.Agent):
     class SendDataBehaviour(behaviour.CyclicBehaviour):
         def __init__(self):
             super().__init__()
-            # Load data files from the current directory
+            # 加载数据文件
             self.data = self.load_household_data()
-            # Track current hour index for sending data
+            # 追踪当前处理的小时索引
             self.current_hour_index = 0
-            # Get unique hours from the dataset
+
+            # 添加缓存字典，用于存储已计算的未来预测数据
+            self.future_data_cache = {}
+
             if self.data is not None:
                 self.unique_hours = sorted(self.data['time'].unique())
+                # 将household_id转换为标准Python整数
+                self.data['household_id'] = self.data['household_id'].apply(lambda x: int(str(x).split('_')[-1]))
                 self.household_ids = sorted(self.data['household_id'].unique())
-                # Initialize household index
-                self.current_household_index = 0
             else:
                 self.unique_hours = []
                 self.household_ids = []
-                print("Error: No data loaded")
-
-            # Flag to indicate if we're done
-            self.all_data_sent = False
 
         def load_household_data(self):
             try:
                 # Read CSV files directly - now loading all three files
+                # 使用GitHub版本的路径格式
                 script_dir = os.path.dirname(__file__)
                 df1 = pd.read_csv(os.path.abspath(os.path.join(script_dir, '../../../data/output/appliances/household_data1.csv')))
                 df2 = pd.read_csv(os.path.abspath(os.path.join(script_dir, '../../../data/output/appliances/household_data2.csv')))
                 df3 = pd.read_csv(os.path.abspath(os.path.join(script_dir, '../../../data/output/appliances/household_data3.csv')))
 
-                # Ensure time column is in datetime format
+                # 确保时间列是datetime格式
                 df1['time'] = pd.to_datetime(df1['time'])
                 df2['time'] = pd.to_datetime(df2['time'])
                 df3['time'] = pd.to_datetime(df3['time'])
 
-                # Merge data
+                # 合并数据
                 combined_df = pd.concat([df1, df2, df3], ignore_index=True)
                 return combined_df
 
             except FileNotFoundError as e:
-                print(f"Error: Could not find file - {e}")
                 return None
             except Exception as e:
-                print(f"Error loading data: {str(e)}")
                 return None
 
         def get_future_hours_data(self, timestamp, household_id, appliance, hours=23):
             """从CSV数据中获取未来指定小时数的预测数据"""
-            future_data = []
+            # 生成当前时间点的缓存键
+            current_key = f"{timestamp}_{household_id}_{appliance}"
 
-            # 获取当前时间之后的23个小时
+            # 检查是否已缓存此数据
+            if current_key in self.future_data_cache:
+                return self.future_data_cache[current_key]
+
+            # 计算未来数据
+            future_data = []
             future_times = [timestamp + timedelta(hours=i + 1) for i in range(hours)]
 
-            # 为每个未来时间点找到对应的数据
             for future_time in future_times:
                 future_row = self.data[(self.data['time'] == future_time) &
                                        (self.data['household_id'] == household_id)]
 
                 if not future_row.empty and appliance in future_row.columns:
-                    # 获取该时间点的设备数据
                     value = round(float(future_row[appliance].iloc[0]), 3)
                     future_data.append(value)
                 else:
-                    # 如果找不到数据，使用0作为占位符
                     future_data.append(0.0)
+
+            # 更新缓存
+            self.future_data_cache[current_key] = future_data
 
             return future_data
 
         def format_household_message(self, timestamp, household_id, row):
-            """Format a household's data into JSON message with future predictions"""
-            # Get appliance columns
+            """将家庭数据格式化为JSON消息，包含未来预测"""
+            # 获取设备列
             appliance_columns = [col for col in self.data.columns if col not in ['time', 'household_id']]
 
-            # Create JSON structure
+            # 创建JSON结构
             message_dict = {
                 "type": "behavior",
                 "timestamp": timestamp.strftime('%Y-%m-%dT%H:%M:%S') + 'Z',
-                "household_id": household_id,
+                "household_id": int(household_id),  # 确保是标准Python整数
                 "data": {}
             }
 
-            # Add current and future appliance readings
+            # 添加当前和未来的设备读数
             for appliance in appliance_columns:
                 if appliance in row and not pd.isna(row[appliance]):
+                    # 确保转换为标准Python数据类型
                     current_value = round(float(row[appliance]), 3)
-                    # 从CSV数据中获取未来23小时的预测值
+                    # 从缓存或CSV数据中获取未来23小时的预测值
                     future_values = self.get_future_hours_data(timestamp, household_id, appliance)
                     # 当前值加上未来23小时的预测值
                     message_dict["data"][appliance] = [current_value] + future_values
 
-            # Convert to JSON string
+            # 转换为JSON字符串
             return json.dumps(message_dict)
 
+        async def process_household(self, household_id, current_hour):
+            """处理单个家庭的数据（可并行执行）"""
+            try:
+                # 筛选当前小时和家庭的数据
+                hour_data = self.data[(self.data['time'] == current_hour) &
+                                      (self.data['household_id'] == household_id)]
+
+                if not hour_data.empty:
+                    # 格式化包含该家庭所有设备的消息
+                    message_text = self.format_household_message(
+                        current_hour, household_id, hour_data.iloc[0])
+
+                    # 使用GitHub版本的接收者地址
+                    msg = Message(to="wxu20@xmpp.is")
+                    msg.body = message_text
+                    await self.send(msg)
+
+                    # 直接打印消息
+                    print(message_text)
+
+                    return True
+                return False
+            except Exception as e:
+                return False
+
         async def run(self):
-            # Check if we have data and if we haven't sent all hours yet
-            if self.data is None or self.all_data_sent:
+            # 如果没有数据，则终止
+            if self.data is None or not self.unique_hours:
                 self.kill()
                 return
 
-            # Get current hour to process
-            current_hour = self.unique_hours[self.current_hour_index]
-            current_household = self.household_ids[self.current_household_index]
+            # 获取当前要处理的小时
+            current_idx = self.current_hour_index % len(self.unique_hours)
+            current_hour = self.unique_hours[current_idx]
 
-            # Filter data for this hour and household
-            hour_data = self.data[(self.data['time'] == current_hour) &
-                                  (self.data['household_id'] == current_household)]
+            # 并行处理所有家庭数据
+            household_chunks = [self.household_ids[i:i + MAX_CONCURRENT_TASKS]
+                                for i in range(0, len(self.household_ids), MAX_CONCURRENT_TASKS)]
 
-            if not hour_data.empty:
-                # Format message with all appliances for this household
-                message_text = self.format_household_message(
-                    current_hour, current_household, hour_data.iloc[0])
+            for chunk in household_chunks:
+                chunk_tasks = []
+                for household_id in chunk:
+                    task = asyncio.create_task(self.process_household(household_id, current_hour))
+                    chunk_tasks.append(task)
 
-                # Create and send the message
-                msg = Message(to="wxu20@xmpp.is")  # Recipient
-                msg.body = message_text
-                await self.send(msg)
+                # 等待当前批次的任务完成
+                await asyncio.gather(*chunk_tasks)
 
-                # Print the message in console
-                print(f"{message_text}")
+            # 移动到下一个小时
+            self.current_hour_index = (self.current_hour_index + 1) % len(self.unique_hours)
 
-            # Move to next household
-            self.current_household_index += 1
-
-            # If we've processed all households for this hour, move to next hour
-            if self.current_household_index >= len(self.household_ids):
-                self.current_household_index = 0
-                self.current_hour_index += 1
-
-            # Check if we've processed all hours
-            if self.current_hour_index >= len(self.unique_hours):
-                self.all_data_sent = True
-
-            # Wait before sending next message
+            # 等待发送间隔
             await asyncio.sleep(SEND_INTERVAL)
 
     async def setup(self):
@@ -153,23 +171,22 @@ class HouseholdConsumptionAgent(agent.Agent):
 
 
 async def main():
-    # Create agent with credentials
+    # 创建带有凭据的代理
     sender = HouseholdConsumptionAgent("appliance@xmpp.is", "prediction5014")
 
-    # Start the agent
+    # 启动代理
     await sender.start()
 
     try:
-        # Keep the agent running until all data is sent
-        while not sender.behaviours[0].is_killed():
+        # 保持代理运行，直到用户中断
+        while True:
             await asyncio.sleep(1)
     except KeyboardInterrupt:
-        pass
+        print("程序已停止")
     finally:
-        # Stop the agent
+        # 停止代理
         await sender.stop()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
