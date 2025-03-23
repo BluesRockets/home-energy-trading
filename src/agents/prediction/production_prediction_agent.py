@@ -51,7 +51,11 @@ class ProductionSenderAgent(agent.Agent):
                 if index < len(df):
                     row = df.iloc[index].to_dict()
                     try:
+<<<<<<< Updated upstream
                         msg = Message(to="loganyang@xmpp.is")  # 目标 XMPP 地址
+=======
+                        msg = Message(to="wxu20@xmpp.is")  # 目标 XMPP 地址 # "wxu20@xmpp.is"
+>>>>>>> Stashed changes
 
                         # 组织 JSON 消息
                         message_data = {
