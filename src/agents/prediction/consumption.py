@@ -48,7 +48,7 @@ class ConsumptionSenderAgent(agent.Agent):
                         "household_id": sheet.split('_')[-1],
                         "consumption": row.iloc[1]
                     }
-                    msg = Message(to="bluecoc@xmpp.is")
+                    msg = Message(to="wxu20@xmpp.is")
                     msg.body = json.dumps(message_content)
                     await self.send(msg)
                     print(f"Message Sent: {message_content}")
